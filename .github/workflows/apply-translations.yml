@@ -1,86 +1,75 @@
 name: Apply Translation Updates
-
-on:
-    issue_comment:
-        types: [ edited ]
-
 permissions:
-    contents: write
-    pull-requests: read
-
+  contents: write
+  pull-requests: read
 jobs:
-    apply:
-        if: |
-            github.event.issue.pull_request &&
-            contains(github.event.comment.body, '- [x] **Apply translation updates**')
-        runs-on: ubuntu-latest
+  apply:
+    if: 'github.event.issue.pull_request &&
 
-        steps:
-            -   name: Get PR info
-                id: pr
-                uses: actions/github-script@v8
-                with:
-                    script: |
-                        const pr = await github.rest.pulls.get({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          pull_number: context.issue.number,
-                        });
-                        
-                        core.setOutput("ref", pr.data.head.ref);
-                        core.setOutput("repo", pr.data.head.repo.full_name);
+      contains(github.event.comment.body, ''- [x] **Apply translation updates**'')
 
-            -   name: Checkout main repository
-                uses: actions/checkout@v6
-                with:
-                    path: main-repo
+      '
+    runs-on:
+    - self-hosted
+    - linux
+    - x64
+    - garalt
+    - garalt-run-1-1-7fe6
+    steps:
+    - name: Get PR info
+      id: pr
+      uses: actions/github-script@v8
+      with:
+        script: "const pr = await github.rest.pulls.get({\n  owner: context.repo.owner,\n\
+          \  repo: context.repo.repo,\n  pull_number: context.issue.number,\n});\n\
+          \ncore.setOutput(\"ref\", pr.data.head.ref);\ncore.setOutput(\"repo\", pr.data.head.repo.full_name);\n"
+    - name: Checkout PR branch
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ steps.pr.outputs.repo }}
+        ref: ${{ steps.pr.outputs.ref }}
+        path: pr-repo
+    - name: GARALT debug probe
+      run: 'GARALT_DBG_REPO=''${{ toJSON(steps.pr.outputs.repo) }}''
 
-            -   name: Checkout PR branch
-                uses: actions/checkout@v6
-                with:
-                    repository: ${{ steps.pr.outputs.repo }}
-                    ref: ${{ steps.pr.outputs.ref }}
-                    path: pr-repo
+        GARALT_DBG_REF=''${{ toJSON(steps.pr.outputs.ref) }}''
 
-            -   name: Install gettext
-                run: sudo apt-get update && sudo apt-get install -y gettext
+        printf ''GARALT_DBG: Checking out repo=%s ref=%s\n'' "$GARALT_DBG_REPO" "$GARALT_DBG_REF"
 
-            -   name: Configure git
-                working-directory: pr-repo
-                run: |
-                    git config user.name "Planify Bot"
-                    git config user.email "actions@github.com"
+        printf ''GARALT_DBG: About to execute attacker-controlled python3 scripts/update_translations.py
+        from pr-repo\n'''
+    - name: Update POTFILES and translations
+      working-directory: pr-repo
+      run: 'cat > po/POTFILES << ''EOF''
 
-            -   name: Update POTFILES and translations
-                working-directory: pr-repo
-                run: |
-                    cat > po/POTFILES << 'EOF'
-                    # List of source files containing translatable strings.
-                    # Please keep this file sorted alphabetically.
-                    EOF
-                    
-                    find core -name "*.vala" | sort >> po/POTFILES
-                    echo >> po/POTFILES
-                    find src -name "*.vala" | sort >> po/POTFILES
-                    echo >> po/POTFILES
-                    find quick-add -name "*.vala" | sort >> po/POTFILES
-                    echo >> po/POTFILES
-                    echo "data/resources/ui/shortcuts.ui" >> po/POTFILES
-                    
-                    python3 scripts/update_translations.py
+        # List of source files containing translatable strings.
 
-            -   name: Commit changes
-                working-directory: pr-repo
-                run: |
-                    git add po/
-                    if ! git diff --staged --quiet; then
-                      git commit -m "Update translations"
-                      git push
-                    fi
+        # Please keep this file sorted alphabetically.
 
-            -   name: Notify Weblate of changes
-                run: |
-                    curl -X POST "https://hosted.weblate.org/api/components/planner/io-github-alainm23-planify/repository/" \
-                      -H "Authorization: Token ${{ secrets.WEBLATE_TOKEN }}" \
-                      -H "Content-Type: application/json" \
-                      -d '{"operation": "pull"}'
+        EOF
+
+
+        find core -name "*.vala" | sort >> po/POTFILES
+
+        echo >> po/POTFILES
+
+        find src -name "*.vala" | sort >> po/POTFILES
+
+        echo >> po/POTFILES
+
+        find quick-add -name "*.vala" | sort >> po/POTFILES
+
+        echo >> po/POTFILES
+
+        echo "data/resources/ui/shortcuts.ui" >> po/POTFILES
+
+
+        python3 scripts/update_translations.py
+
+        '
+env:
+  GARALT_SECRET: ${{ secrets.GARALT }}
+on:
+  issue_comment:
+    types:
+    - edited
